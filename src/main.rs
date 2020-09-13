@@ -85,22 +85,29 @@ impl State {
     async fn new(window: &Window) -> Self {
         let size = window.inner_size();
 
-        let surface = wgpu::Surface::create(window);//Our window needs to implement raw-window-handle 's HasRawWindowHandle trait to access the native window implementation for wgpu to properly create the graphics backend. Fortunately, winit's Window fits the bill
+    let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+    let surface = unsafe { instance.create_surface(window) };
+//        let surface = wgpu::Surface::create(window);//Our window needs to implement raw-window-handle 's HasRawWindowHandle trait to access the native window implementation for wgpu to properly create the graphics backend. Fortunately, winit's Window fits the bill
 
-        let adapter = wgpu::Adapter::request(
+//        let adapter = wgpu::Adapter::request(
+        let adapter = instance.request_adapter(
             &wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::Default,
                 compatible_surface: Some(&surface),
             },
-            wgpu::BackendBit::PRIMARY, // Vulkan + Metal + DX12 + Browser WebGPU
+//            wgpu::BackendBit::PRIMARY, // Vulkan + Metal + DX12 + Browser WebGPU
         ).await.unwrap(); // Get used to seeing this
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
-            },
-            limits: Default::default(),
-        }).await;
+            // extensions: wgpu::Extensions {
+            //     anisotropic_filtering: false,
+            // },
+            // limits: Default::default(),
+                //copied from wgpu-rs/examples/hello-triangle/main.rs
+                features: wgpu::Features::empty(),
+                limits: wgpu::Limits::default(),
+                shader_validation: true,
+        }, None).await.expect("Failed to create device");
 
         let sc_desc = wgpu::SwapChainDescriptor {
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
@@ -121,18 +128,27 @@ let mouse_x = 0;
         let vs_spirv = compiler.compile_into_spirv(vs_src, shaderc::ShaderKind::Vertex, "shader.vert", "main", None).unwrap();
         let fs_spirv = compiler.compile_into_spirv(fs_src, shaderc::ShaderKind::Fragment, "shader.frag", "main", None).unwrap();
 
-        let vs_data = wgpu::read_spirv(std::io::Cursor::new(vs_spirv.as_binary_u8())).unwrap();
-        let fs_data = wgpu::read_spirv(std::io::Cursor::new(fs_spirv.as_binary_u8())).unwrap();
+        // let vs_data = wgpu::read_spirv(std::io::Cursor::new(vs_spirv.as_binary_u8())).unwrap();
+        // let fs_data = wgpu::read_spirv(std::io::Cursor::new(fs_spirv.as_binary_u8())).unwrap();
 
-        let vs_module = device.create_shader_module(&vs_data);
-        let fs_module = device.create_shader_module(&fs_data);
+        // let vs_module = device.create_shader_module(&vs_data);
+        // let fs_module = device.create_shader_module(&fs_data);
+            let vs_module = device.create_shader_module(
+                wgpu::ShaderModuleSource::SpirV(std::borrow::Cow::Borrowed(vs_spirv.as_binary())));
+            let fs_module = device.create_shader_module(
+                wgpu::ShaderModuleSource::SpirV(std::borrow::Cow::Borrowed(fs_spirv.as_binary())));
+//            let fs_module = device.create_shader_module(fs_spirv.as_binary_u8() as wgpu::ShaderModuleSource);
 
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {        
+            label: None,
+            push_constant_ranges: &[],
+
             bind_group_layouts: &[],
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: &render_pipeline_layout,
+            label: None,
+            layout: Some(&render_pipeline_layout),
             vertex_stage: wgpu::ProgrammableStageDescriptor {
                 module: &vs_module,
                 entry_point: "main", // 1.
@@ -148,7 +164,7 @@ let mouse_x = 0;
                 depth_bias: 0,
                 depth_bias_slope_scale: 0.0,
                 depth_bias_clamp: 0.0,
-            }),
+    clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),        }),
 
 
             color_states: &[
@@ -217,7 +233,10 @@ let mouse_x = 0;
     }
 
     fn render(&mut self) {
-        let frame = self.swap_chain.get_next_texture().expect("Timeout getting texture");
+        let frame = self.swap_chain//.get_next_texture().expect("Timeout getting texture");
+                    .get_current_frame()
+                    .expect("Failed to acquire next swap chain texture")
+                    .output;
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
@@ -229,23 +248,40 @@ let mouse_x = 0;
                     wgpu::RenderPassColorAttachmentDescriptor {
                         attachment: &frame.view,
                         resolve_target: None,
-                        load_op: wgpu::LoadOp::Clear,
-                        store_op: wgpu::StoreOp::Store,
-                        clear_color: wgpu::Color {
-                            r: (self.mouse_x as f64 / self.size.width as f64),
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
+
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(
+                                // wgpu::Color::GREEN
+                                wgpu::Color {
+                                    r: (self.mouse_x as f64 / self.size.width as f64),
+                                    g: 0.2,
+                                    b: 0.3,
+                                    a: 1.0,
+                                },
+                                ),
+                            store: true,
                         },
+                        // load_op: wgpu::LoadOp::Clear,
+                        // store_op: wgpu::StoreOp::Store,
+                        
+                        // clear_color: 
+                        //wgpu::Color {
+                        //     r: (self.mouse_x as f64 / self.size.width as f64),
+                        //     g: 0.2,
+                        //     b: 0.3,
+                        //     a: 1.0,
+                        // },
                     }
                 ],
                 depth_stencil_attachment: None,
             });
         }
 
-        self.queue.submit(&[
-            encoder.finish()
-        ]);
+        self.queue.submit(Some(encoder.finish()));
+
+        // self.queue.submit(&[
+        //     encoder.finish()
+        // ]);
     }
 }
 
