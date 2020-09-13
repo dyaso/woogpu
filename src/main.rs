@@ -73,6 +73,9 @@ struct State {
     sc_desc: wgpu::SwapChainDescriptor,
     swap_chain: wgpu::SwapChain,
 
+
+    render_pipeline: wgpu::RenderPipeline,
+
     size: winit::dpi::PhysicalSize<u32>,
 
     mouse_x: i32
@@ -106,8 +109,72 @@ impl State {
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
         };
+
         let swap_chain = device.create_swap_chain(&surface, &sc_desc);
 let mouse_x = 0;
+
+
+        let vs_src = include_str!("shader.vert");
+        let fs_src = include_str!("shader.frag");
+
+        let mut compiler = shaderc::Compiler::new().unwrap();
+        let vs_spirv = compiler.compile_into_spirv(vs_src, shaderc::ShaderKind::Vertex, "shader.vert", "main", None).unwrap();
+        let fs_spirv = compiler.compile_into_spirv(fs_src, shaderc::ShaderKind::Fragment, "shader.frag", "main", None).unwrap();
+
+        let vs_data = wgpu::read_spirv(std::io::Cursor::new(vs_spirv.as_binary_u8())).unwrap();
+        let fs_data = wgpu::read_spirv(std::io::Cursor::new(fs_spirv.as_binary_u8())).unwrap();
+
+        let vs_module = device.create_shader_module(&vs_data);
+        let fs_module = device.create_shader_module(&fs_data);
+
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts: &[],
+        });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            layout: &render_pipeline_layout,
+            vertex_stage: wgpu::ProgrammableStageDescriptor {
+                module: &vs_module,
+                entry_point: "main", // 1.
+            },
+            fragment_stage: Some(wgpu::ProgrammableStageDescriptor { // 2.
+                module: &fs_module,
+                entry_point: "main",
+            }),
+
+            rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: wgpu::CullMode::Back,
+                depth_bias: 0,
+                depth_bias_slope_scale: 0.0,
+                depth_bias_clamp: 0.0,
+            }),
+
+
+            color_states: &[
+                wgpu::ColorStateDescriptor {
+                    format: sc_desc.format,
+                    color_blend: wgpu::BlendDescriptor::REPLACE,
+                    alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                    write_mask: wgpu::ColorWrite::ALL,
+                },
+            ],
+
+                    
+            primitive_topology: wgpu::PrimitiveTopology::TriangleList, // 1.
+            depth_stencil_state: None, // 2.
+            vertex_state: wgpu::VertexStateDescriptor {
+                index_format: wgpu::IndexFormat::Uint16, // 3.
+                vertex_buffers: &[], // 4.
+            },
+            sample_count: 1, // 5.
+            sample_mask: !0, // 6.
+            alpha_to_coverage_enabled: false, // 7.
+
+         
+        });
+
+
         Self {
             surface,
             adapter,
@@ -115,6 +182,8 @@ let mouse_x = 0;
             queue,
             sc_desc,
             swap_chain,
+
+            render_pipeline,
             size,
             mouse_x
         }

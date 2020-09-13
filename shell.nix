@@ -27,6 +27,10 @@ stdenv.mkDerivation {
   	    xorg.libXcursor
   	    xorg.libXrandr
   	    xorg.libXi
+
+cmake # needed to make the shader compiler thing? shaderc-sys(build)
+
+
 ];
 
   RUST_BACKTRACE = 1;
